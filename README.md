@@ -5,9 +5,10 @@ Simple TowerDefence clone written in Python and PyGame.
 ## Goal
 
 I would get a funny access to Python and the simple graphical programming.
-TowerDefence is based on a simple princip and offers a lot of problems for beginners. 
+TowerDefence is based on a simple princip and offers a lot of problems for beginners.
+TinyDefence should be the way for trying python and learn more about it. 
 
-This project should be a test park for Python and Github. 
+Also, this project should be a little playground for Python and Github. 
 
 ## Vision
 
