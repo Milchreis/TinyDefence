@@ -58,10 +58,7 @@ class TowerDefenceGame:
 	def addTower( self, mousePos ):
 		tile = self.map.getTileIndex( mousePos[0], mousePos[1] )
 
-		# normalize to grid
-		#tileX = ( mousePos[0] // self.map.tileWidth )
-		#tileY = ( mousePos[1] // self.map.tileHeight )
-
+		# build tower on the way is not allowed
 		if( self.map.getTileType( tile[0], tile[1] ) == TileMap.WAY ):
 			return
 
@@ -460,6 +457,9 @@ def main():
                 if event.button == 1:
                 	if( tdGame.state == TowerDefenceGame.START ):
                 		tdGame.state = TowerDefenceGame.GAME
+                	elif( tdGame.state == TowerDefenceGame.GAME_OVER or tdGame.state == TowerDefenceGame.WON ):
+                		tdGame = TowerDefenceGame()
+                		tdGame.state = TowerDefenceGame.START
                 	else:
                 		tdGame.addTower( event.pos )
 
