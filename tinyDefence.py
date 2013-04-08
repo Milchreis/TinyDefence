@@ -1,42 +1,43 @@
 import pygame
-from pygame.gfxdraw import *
 from pygame.locals import *
-import math
+import copy
+
+import helpers
+from tilemap import *
+from level import *
+from mobs import *
 
 title = "TinyDefence"
 version = 0.1
 
-WIDTH = 800
-HEIGHT = 576
+""" set up your own level """
+# Syntax: [ Level( waypoints, waves ), Level( waypoints, waves )]
+# waypoints: [ startpoint, toPoint, toPoint, ..., endPoint ]
+# waves  [ Wave( spawningPause, numberOfEnemies, additionalHealth, additionalSpeed, additionalPoints ), ... ]
 
-def isInRange( tower, enemy ):
-	x = ( enemy.x - tower.x ) * ( enemy.x - tower.x )
-	y = ( enemy.y - tower.y ) * ( enemy.y - tower.y )
-	return math.sqrt( x + y ) < tower.range + enemy.radius
-
-class Level:
-	def __init__( self ):
-		self.waves = []
-		self.pauseTime = 15000
-		self.level = []
-		self.lastWaveIndex = 0
-
-class FirstLevel( Level ):
-	def __init__( self ):
-		Level.__init__( self )
-		# path points for the map and the enemies
-		self.level = [ [0, 3], [21, 3], [21, 5], [3,5], [3,7], [18, 7],
-				[18, 9], [12, 9], [12, 12] 
-			]
-
-		# enemyDropTime, maxEnemies, enemyHealthOffset, enemySpeedOffset, pointOffset
-		self.waves.append( Wave( 1000, 5, 0, 0, 0.2 ) )
-		self.waves.append( Wave( 1000, 10, 1, 1, 0.2 ) )
-		self.waves.append( Wave( 950, 10, 2, 2, 0.2 ) )
-		self.waves.append( Wave( 850, 5, 5, 3, 0.2 ) )
-		self.waves.append( Wave( 500, 10, 1, 2, 0.4 ) )
-		self.waves.append( Wave( 700, 20, 1, 5, 0.4 ) )
-		self.waves.append( Wave( 1000, 1, 30, 0, 10 ) )
+myLevel = [
+	Level( 
+			[[0, 3], [21, 3], [21, 5], [3,5], [3,7], [18, 7], [18, 9], [12, 9], [12, 12]],
+			[ 	Wave( 1000, 1, 0, 0, 0.5 ), 
+				Wave( 1000, 2, 0, 0, 0.5 ), 
+				Wave( 1000, 5, 1, 1, 0.5 ), 
+				Wave( 500, 2, 3, 0, 0.3 ), 
+				Wave( 800, 10, 3, 2, 0.4 ), 
+				Wave( 800, 15, 4, 3, 0.4 ), 
+				Wave( 500, 20, 6, 3, 0.5 ), 
+			] ),
+ 	Level(
+			[[12, 0], [12, 5], [9, 5], [9, 9], [15, 9], [15, 14] ],
+			[ 	Wave( 800,  8, 2, 1, 0.3 ), 
+				Wave( 800, 10, 3, 2, 0.3 ), 
+				Wave( 800,  6, 5, 1, 0.3 ), 
+				Wave( 800,  8, 1, 3, 0.3 ), 
+				Wave( 800, 15, 4, 1, 0.3 ), 
+				Wave( 800, 20, 2, 3, 0.3 ), 
+				Wave( 800, 3, 40, 1, 0.3 ), 
+			] )
+]
+""" --------------------  """
 
 class TowerDefenceGame:
 	START = 0 
@@ -44,16 +45,27 @@ class TowerDefenceGame:
 	WON = 2
 	GAME_OVER = 3
 
-	def __init__( self ):
+	def __init__( self, width, height ):
 		self.points = 15
 		self.lifes = 5
 		self.towers = []
-		self.map = TileMap()
-		self.level = FirstLevel()
-		self.setLevel( self.level )
+		self.map = TileMap( width, height )
+		self.levels = []
+		self.levelIndex = 0
 		self.enemies = []
 		self.lastTick = 0
 		self.state = TowerDefenceGame.START
+
+	def reset( self ):
+		self.towers = []
+		self.points = 15
+		self.lifes = 5
+		self.map.reset()
+
+	def addLevel( self, level ):
+		self.levels.append( level )
+		if( len( self.levels ) == 1 ):
+			self.setLevel( self.levels[0] )
 
 	def addTower( self, mousePos ):
 		tile = self.map.getTileIndex( mousePos[0], mousePos[1] )
@@ -79,6 +91,7 @@ class TowerDefenceGame:
 			self.points -= tower.price 
 
 	def setLevel( self, levelObj ):
+		self.reset()
 		lastPoint = levelObj.level[0]
 
 		for point in levelObj.level:
@@ -96,32 +109,44 @@ class TowerDefenceGame:
 			now = pygame.time.get_ticks()
 			self.map.render( screen )
 
-			wave = self.level.waves[self.level.lastWaveIndex]
+			level = self.levels[self.levelIndex]
+			wave = level.waves[level.lastWaveIndex]
 			if( now - self.lastTick > wave.enemyDropTime and wave.maxEnemies > 0 ): 
 				enemy = Enemy( self.map.tileWidth, self.map.tileHeight )
 				enemy.speed += wave.enemySpeedOffset
 				enemy.health += wave.enemyHealthOffset
 				enemy.currentHealth = enemy.health
 				enemy.points += wave.pointOffset
-				enemy.setWaypoints( self.level.level )
+				enemy.setWaypoints( level.level )
 				self.enemies.append( enemy )
 
 				wave.maxEnemies = wave.maxEnemies - 1
 				self.lastTick = pygame.time.get_ticks()
 
+			# check next event if all enemies down
 			if( wave.maxEnemies == 0 and len( self.enemies ) == 0 ):
-				if( self.level.lastWaveIndex == len( self.level.waves )-1 ):
+				# game won?
+				if( self.levelIndex == len( self.levels )-1 and 
+					level.lastWaveIndex == len( level.waves )-1 ):
 					self.state = TowerDefenceGame.WON
-				else:
+				
+				# next level?
+				if( self.levelIndex < len( self.levels )-1 and 
+					level.lastWaveIndex == len( level.waves )-1 ):
+					self.levelIndex += 1
+					self.setLevel( self.levels[self.levelIndex] )
+
+				# next wave?
+				if( level.lastWaveIndex != len( level.waves )-1  ):
 					print( "pause is started" )
-					if( now - self.lastTick > self.level.pauseTime ):
+					if( now - self.lastTick > level.pauseTime ):
 						print( "pause is over" )
-						self.level.lastWaveIndex = self.level.lastWaveIndex + 1
+						level.lastWaveIndex = level.lastWaveIndex + 1
 
 			# check enemies
 			toRemove = []
 			for enemy in self.enemies:
-				if( enemy.lastWaypointIndex == len( self.level.level ) - 1 ):
+				if( enemy.lastWaypointIndex == len( level.level ) - 1 ):
 					toRemove.append( enemy )
 					self.lifes -= 1
 
@@ -148,12 +173,12 @@ class TowerDefenceGame:
 				# look for an enemy in range
 				if( tower.focusedEnemy == None ):
 					for enemy in self.enemies:
-						if( isInRange( tower, enemy ) ):
+						if( helpers.isInRange( tower, enemy ) ):
 							tower.focusedEnemy = enemy
 							break
 				else:
 					# is focused enemy already in range
-					if( not isInRange( tower, tower.focusedEnemy ) 
+					if( not helpers.isInRange( tower, tower.focusedEnemy ) 
 						or tower.focusedEnemy.currentHealth <= 0):
 						tower.focusedEnemy = None
 
@@ -163,7 +188,7 @@ class TowerDefenceGame:
 			myfont = pygame.font.SysFont( "sans", 20 )
 			points = myfont.render( 'Points: ' + str( int( self.points ) ), 1, ( 255, 255, 0 ) )
 			lifes = myfont.render( 'Lifes: ' + str( self.lifes ), 1, ( 255, 255, 0 ) )
-			waves = myfont.render( 'Wave: ' + str( self.level.lastWaveIndex+1 ) + " of " +str( len( self.level.waves ) ), 1, ( 255, 255, 0 ) )
+			waves = myfont.render( 'Wave: ' + str( level.lastWaveIndex+1 ) + " of " +str( len( level.waves ) ), 1, ( 255, 255, 0 ) )
 			screen.blit( points, ( 15, 10 ) )
 			screen.blit( lifes, ( 15, 35 ) )
 			screen.blit( waves, ( 15, 60 ) )
@@ -186,289 +211,72 @@ class TowerDefenceGame:
 	def renderMenue( self, screen ):
 		myfont = pygame.font.SysFont( "sans", 40 )
 		txt = myfont.render( 'Click to start', 1, ( 255, 255, 255 ) )
-		screen.blit( txt, ( 100, HEIGHT//2 ) )
+		screen.blit( txt, ( 100, screen.get_height()//2 ) )
 
 	def renderWon( self, screen ):
 		print( "You won" )
 		myfont = pygame.font.SysFont( "sans", 40 )
 		txt = myfont.render( 'You won the game', 1, ( 255, 255, 255 ) )
-		screen.blit( txt, ( 100, HEIGHT//2 ) )
+		screen.blit( txt, ( 100, screen.get_height()//2 ) )
 
 	def renderGameover( self, screen ):
 		print( "You lose" )
 		myfont = pygame.font.SysFont( "sans", 40 )
 		txt = myfont.render( 'You loose the game', 1, ( 255, 255, 255 ) )
-		screen.blit( txt, ( 100, HEIGHT//2 ) )
-
-class TileMap:
-	PLAIN = 0
-	WAY = 1
-	BASE = 2
-
-	PLAIN_COLOR = ( 71, 161, 71 )
-	WAY_COLOR = ( 174, 149, 89 )
-	BASE_COLOR = ( 10, 10, 10 )
-
-	def __init__( self ):
-		self.tileWidth = 32
-		self.tileHeight = 32
-		self.mapWidth = WIDTH // self.tileWidth
-		self.mapHeight = HEIGHT // self.tileHeight
-		self.map = []
-
-		self.base = []
-
-		# create plain map
-		for x in xrange( self.mapWidth ):
-			self.map.append( [] )
-			for y in xrange( self.mapHeight ):
-				self.map[x].append( TileMap.PLAIN )
-
-	def getTileIndex( self, x, y ):
-		return [ x // self.tileWidth, y // self.tileHeight ]
-
-	def getTileType( self, tileX, tileY ):
-		return self.map[tileX][tileY]
-
-	def setBase( self, tile ):
-		self.base = tile
-		self.map[tile[0]][tile[1]] = TileMap.BASE
-
-	def render( self, screen ):
-		for x in xrange( self.mapWidth ):
-			for y in xrange( self.mapHeight ):
-				tiletype = self.map[x][y] 
-				color = None
-
-				if( tiletype == TileMap.PLAIN ):
-					color = TileMap.PLAIN_COLOR
-				
-				if( tiletype == TileMap.WAY ):
-					color = TileMap.WAY_COLOR
-
-				if( tiletype == TileMap.BASE ):
-					color = TileMap.BASE_COLOR
-				
-				# tile bg
-				pygame.draw.rect( screen, color, (x*self.tileWidth, y*self.tileHeight, self.tileWidth, self.tileHeight), 0 )
-				
-				# tile border
-				pygame.draw.rect( screen, (133, 180, 133), (x*self.tileWidth, y*self.tileHeight, self.tileWidth, self.tileHeight), 1 )
-
-	def createStraightWay( self, fromPosition, toPosition ):
-		""" please, use only straight lines """
-		
-		start = None
-		end = None
-		isX = None
-
-		if( fromPosition[0] == toPosition[0] ):
-			isX = True
-			start = fromPosition[1]
-			end = toPosition[1]
-		else:
-			isX = False
-			start = fromPosition[0]
-			end = toPosition[0]
-
-		if( start > end ):
-			start, end = end, start
-
-		for i in range( start, end+1, 1 ):
-			if( isX ):
-				self.map[fromPosition[0]][i] = TileMap.WAY
-			else:
-				self.map[i][fromPosition[1]] = TileMap.WAY
-
-class Wave:
-	def __init__( self, enemyDropTime, maxEnemies, enemyHealthOffset, enemySpeedOffset, pointOffset ):
-		self.enemyDropTime = enemyDropTime
-		self.maxEnemies = maxEnemies
-		self.enemyHealthOffset = enemyHealthOffset
-		self.enemySpeedOffset = enemySpeedOffset
-		self.pointOffset = pointOffset
-
-class Tower:
-	def __init__( self, x, y ):
-		self.x = x
-		self.y = y
-		self.radius = 10
-		self.strange = 2.0
-		self.range = 60
-		self.price = 5
-		self.focusedEnemy = None
-		self.attackPause = 800
-		self.isHover = False
-		
-		self.attacks = []
-		self.attackTicks = 3
-		self.attackTicksCount = 0
-		self.lastTick = 0
-		self.attackPos = None
-
-	def render( self, screen ):
-		now = pygame.time.get_ticks()
-		pygame.draw.circle( screen, (0, 0, 200), (self.x, self.y), self.radius )
-
-		if( self.isHover ):
-			pygame.draw.circle( screen, (200, 200, 200, 200), (self.x, self.y), self.range, 1 )
-
-		if( self.focusedEnemy != None and ( now - self.lastTick ) >= self.attackPause ):
-			self.attacks.append( Attack( self ) )
-			self.lastTick = pygame.time.get_ticks()
-
-		toRemove = []
-		for a in self.attacks:
-			if( a.isOver ):
-				toRemove.append( a )
-
-		for a in toRemove:
-			self.attacks.remove( a )
-
-		for a in self.attacks:
-			a.render( screen, self.focusedEnemy )
+		screen.blit( txt, ( 100, screen.get_height()//2 ) )
 
 
-class Attack:
-	def __init__( self, tower ):
-		self.tower = tower
-		self.attackTicks = 5
-		self.attackTicksCount = 0
-		self.lastTick = 0
-		self.enemy = None
-		self.isOver = False
+def createGame( width, height, levels ):
+	tdGame = TowerDefenceGame( width, height )
+	tdGame.state = TowerDefenceGame.START
 
-	def render( self, screen, enemy ):
-		self.enemy = enemy
-		now = pygame.time.get_ticks()
+	for level in levels:
+		tdGame.addLevel( copy.deepcopy( level ) )
 
-		if( enemy != None and isInRange( self.tower, enemy ) ):
-			dx = enemy.x - self.tower.x
-			dy = enemy.y - self.tower.y
-			steps = dx // self.attackTicks
-			
-			if( dx == 0 ):
-				dx = 0.01
-
-			a = self.tower.x - ( self.tower.x + ( steps*self.attackTicksCount ) )
-			b = (a * dy) / dx
-			attackPos = [int( self.tower.x - a ), int( self.tower.y - b ) ]
-
-			if( self.attackTicksCount <= self.attackTicks ):
-				pygame.draw.circle( screen, (20, 20, 20), (attackPos[0], attackPos[1] ), 3 )
-				self.attackTicksCount += 1
-			else:
-				enemy.currentHealth -= self.tower.strange
-				self.isOver = True
-		else:
-			self.isOver = True
-
-class Enemy:
-	def __init__( self, tileWidth, tileHeight ):
-		self.x = 100
-		self.y = 100
-		self.waypoints = []
-		self.speed = 1
-		self.health = 10.0
-		self.currentHealth = self.health
-		self.points = 0.5
-		self.tileWidth = tileWidth
-		self.tileHeight = tileHeight
-		self.radius = 10
-		self.lastWaypointIndex = 0
-
-	def setWaypoints( self, waypoints ):
-		self.waypoints = waypoints
-		self.x = self.waypoints[0][0] * (self.tileWidth) + (self.tileWidth//2)
-		self.y = self.waypoints[0][1] * (self.tileHeight) + (self.tileHeight//2) 
-
-	def isAround( self, valueA, valueB, range ):
-		if( valueA >= valueB-range and valueA < valueB+range ):
-			return True
-		else:
-			return False
-
-	def render( self, screen ):
-		nextWaypoint = self.waypoints[self.lastWaypointIndex+1]
-		nextWaypoint = [
-				nextWaypoint[0]*(self.tileWidth)+(self.tileWidth//2), 
-				nextWaypoint[1]*(self.tileHeight)+(self.tileHeight//2) 
-			]
-
-		if( self.isAround( self.x, nextWaypoint[0], 5 ) and
-			self.isAround( self.y, nextWaypoint[1], 5 ) ):
-			self.lastWaypointIndex = self.lastWaypointIndex+1
-
-		if( self.x < nextWaypoint[0] ):
-			if( self.x + self.speed > nextWaypoint[0] ):
-				self.x = nextWaypoint[0]
-			else:
-				self.x = self.x + self.speed
-
-		if( self.x > nextWaypoint[0] ):
-			if( self.x - self.speed < nextWaypoint[0] ):
-				self.x = nextWaypoint[0]
-			else:
-				self.x = self.x - self.speed
-
-		if( self.y < nextWaypoint[1] ):
-			if( self.y + self.speed > nextWaypoint[1] ):
-				self.y = nextWaypoint[1]
-			else:
-				self.y = self.y + self.speed
-
-		if( self.y > nextWaypoint[1] ):
-			if( self.y - self.speed < nextWaypoint[1] ):
-				self.y = nextWaypoint[1]
-			else:
-				self.y = self.y - self.speed
-
-		pygame.draw.circle( screen, (200, 0, 0), (self.x, self.y), self.radius )
-
-		# render health
-		width = (self.currentHealth/self.health) * 30
-		pygame.draw.rect( screen, (255,0,0), (self.x-15, self.y+15, 30, 2 ), 0 )
-		pygame.draw.rect( screen, (0,255,0), (self.x-15, self.y+15, int( width ), 2 ), 0 )
+	return tdGame
 
 def main():
-    pygame.init()
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+	pygame.init()
+	screen = pygame.display.set_mode( ( 800, 576 ) )
+	pygame.mouse.set_visible( 1 )
 
-    pygame.mouse.set_visible(1)
-    pygame.key.set_repeat(1, 30)
+	pygame.key.set_repeat( 1, 30 )
+	clock = pygame.time.Clock()
 
-    clock = pygame.time.Clock()
-    tdGame = TowerDefenceGame()
+	tdGame = createGame( screen.get_width(), screen.get_height(), myLevel )
 
-    running = True
-    while running:
-        clock.tick(60)
-        screen.fill((0, 0, 0))
+	running = True
+	while running:
+		clock.tick( 60 )
+		screen.fill( ( 0, 0, 0 ) )
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
- 
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    pygame.event.post(pygame.event.Event(pygame.QUIT))
+		for event in pygame.event.get():
+			if event.type == pygame.QUIT:
+				running = False
 
-            if event.type == MOUSEBUTTONDOWN:
-                if event.button == 1:
-                	if( tdGame.state == TowerDefenceGame.START ):
-                		tdGame.state = TowerDefenceGame.GAME
-                	elif( tdGame.state == TowerDefenceGame.GAME_OVER or tdGame.state == TowerDefenceGame.WON ):
-                		tdGame = TowerDefenceGame()
-                		tdGame.state = TowerDefenceGame.START
-                	else:
-                		tdGame.addTower( event.pos )
+			if event.type == pygame.KEYDOWN:
+				if event.key == pygame.K_ESCAPE:
+					pygame.event.post( pygame.event.Event( pygame.QUIT ) )
 
-        # render game
-        tdGame.render( screen )
+			if event.type == MOUSEBUTTONDOWN:
+				if event.button == 1:
+					if( tdGame.state == TowerDefenceGame.START ):
+						tdGame.state = TowerDefenceGame.GAME
 
-        # show fps in window title
-        pygame.display.set_caption( title + " - FPS: %.1f" % clock.get_fps() )
-        pygame.display.flip()
+					elif( tdGame.state == TowerDefenceGame.GAME_OVER or tdGame.state == TowerDefenceGame.WON ):
+						tdGame = createGame( screen.get_width(), screen.get_height(), myLevel )
+					else:
+						tdGame.addTower( event.pos )
+
+		# render game
+		tdGame.render( screen )
+
+		# show fps in window title
+		pygame.display.set_caption( title + " - FPS: %.1f" % clock.get_fps() )
+		pygame.display.flip()
+
+	# exit
+	pygame.quit()
 
 if __name__ == '__main__':
-    main()
+	main()
